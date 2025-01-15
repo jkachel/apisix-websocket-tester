@@ -1,6 +1,6 @@
 # WebSockets: Authentication via APISIX
 
-APISIX supports routing WebSocket traffic, and can be used to provide an authentication layer for these requests. To test and demonstrate this, I set up a simple test rig application, consisting of a very simple HTML frontend and a Python backend that uses the WebSockets package directly.
+APISIX supports routing WebSocket traffic, and can be used to provide an authentication layer for these requests. To test and demonstrate this, I set up a simple test rig application, consisting of a very simple HTML frontend and a Python backend that uses the WebSockets package directly. The test rig is available [here](https://github.com/jkachel/apisix-websocket-tester).
 
 ## Testing setup
 
@@ -14,34 +14,29 @@ A production app would not be written directly with WebSockets necessarily, but 
 
 ## Authentication Flow
 
-As noted, APISIX supports WebSockets as one of the protocols that it can manage, and this includes configuring plugins for various purposes (such as authentication). The test rig is set up with two routes in APISIX. One route (for `/`) is for delivering the frontend. The second proxies the WebSocket connection to the echo server. Both of these are set up with the `openid-connect` plugin to authenticate the user via Keycloak.
+As noted, APISIX supports WebSockets as one of the protocols that it can manage, and this includes configuring plugins for various purposes (such as authentication). APISIX will attempt to authenticate the user depending on what plugins are configured. For OL apps, this means using OIDC to Keycloak (via the `openid-connect` plugin), but this could also be via other methods.
 
-WebSocket connections are established first via a handshake, which is done over HTTP. This gives APISIX an opportunity to attach user data to the incoming request. If the user is authenticated (i.e., has a session that's managed by APISIX), it will attach a `X-Userinfo` header that contains the user's account details in a base64-encoded JSON payload. The WebSocket server can parse the headers that are sent during the handshake and perform whatever processes it needs to act on behalf of the named user.
+WebSocket connections are established first via a handshake, which is done over HTTP. APISIX will use this step to determine what the user's authentication status is, and will take an action depending on that status and the route's configuration:
 
-One of the pain points is establishing a session - you can set up APISIX to use OIDC on the WebSocket route, but handing unauthenticated users requires some additional work.
+* If the user is authenticated, APISIX will pass the request along to the service. APISIX will also attach user data to the incoming request: an `X-Userinfo` header that contains the user's account details in a base64-encoded JSON payload is added to the handshake request that is sent to the WebSocket server. The WebSocket server can parse the headers that are sent during the handshake and perform whatever processes it needs to act on behalf of the named user for the session.
+* If the user doesn't have a session, then the route's configuration determines what APISIX does next. APISIX can simply deny the request and return a `401 Unauthorized` response, it can pass the request along without any user data, or it can attempt to establish a new session for the user.
 
 ### Establishing a Session
 
-WebSockets don't generally handle return codes other than `101 Switching Protocols` from the handshake process well. If the user does not have a session set up, APISIX may try to redirect the user through Keycloak when they attempt to connect to the WebSocket server. This will fail. Or, it can be set up to deny the request, which will (obviously) fail.
+If APISIX attempts to establish a new session for the user, it will do so by trying to redirect them through the identity provider. For normal HTTP requests, the user would get a login screen, authenticate with the identity provider, and then be sent back to APISIX; APISIX would then internally set up a session for the user and maintain it.
 
-So, a session needs to exist in APISIX _first_ if the WebSocket service needs to know about the user. There's a few avenues for doing this:
+However, WebSockets don't generally handle return codes other than `101 Switching Protocols` from the handshake process. So, if the user is redirected, the WebSocket connection will fail. (It will also obviously fail if APISIX is set to deny the request.) So, a session needs to exist in APISIX _first_ if the WebSocket service needs to know about the user. 
 
-- If the user already has a session, then APISIX will reuse it.
-- If the user doesn't have a session, the route to the WebSocket server can be set up to pass the connection along without authentication, rather than attempt to redirect them. (See notes below for testing this with the test rig.) The WebSocket server code then must implement a protocol to alert the frontend that there's no session, or otherwise enter some sort of limited access mode.
-- If the user doesn't have a session, and the route in APISIX is set up to redirect, the frontend may want to interpret the resulting error as a `403`. The frontend should then have a path to authenticate the user.
+There's a few avenues for doing this:
 
-> [!IMPORTANT]
-> The last option is probably the worst choice, because this overloads the error event. [By design](https://websockets.spec.whatwg.org/#eventdef-websocket-error), the WebSockets JavaScript API exposes _no_ information about what the error _was_ - merely that an error occurred - so an error may not necessarily be because the user is anonymous.
+- If the user has an existing session, APISIX will reuse it. So, if the frontend (or some other part of the app, like the REST API) is routed through APISIX, it should pick up the session from there. This is essentially the route the test rig uses. You need to log in to accesss the frontend via APISIX, so the WebSocket connection simply reuses that session. 
+- APISIX can simply pass the connection along without user data. In this case, the app will need to either be accessible in some form by anonymous users, or it will need to have a protocol that tells the frontend that a session needs to be established.
 
-#### Passing Anonymous Connections
-
-The [relevant setting for the `openid-connect` plugin](https://apisix.apache.org/docs/apisix/plugins/openid-connect/) is `unauth_action`, which can be `deny`, `pass`, or `auth`. The default is `auth`, which will redirect the user through the identity provider. Setting this to `pass` will pass the connection on without any user data. 
-
-The test rig server will identify the user as "anonymous". Otherwise, it assumes you're whatever `preferred_username` that Keycloak sends on (which is typically the email address).
+Apps should avoid treating errors on connect as authentication errors. [By design](https://websockets.spec.whatwg.org/#eventdef-websocket-error), WebSockets errors don't contain any real data in them.
 
 ### Getting User Data
 
-The data that gets passed via APISIX into the user info header is dependent on what scopes are set up and how the realm and client are set up. You can usually expect at least an email address and the ID that Keycloak has for the user. The app can use whatever method it needs to map this to a user - for example, Unified Ecommerce uses the Keycloak ID as the identifier and creates or updates a Django user based on it.
+The data that gets passed via APISIX into the user info header is dependent on what scopes are set up and how the realm and client are set up. You can usually expect at least an email address and the ID that Keycloak has for the user, though. The app can use whatever method it needs to map this to a user - for example, Unified Ecommerce uses the Keycloak ID as the identifier and creates or updates a Django user based on it.
 
 ## Using the Test Rig
 
