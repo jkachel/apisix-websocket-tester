@@ -20,19 +20,22 @@ from websockets.exceptions import ConnectionClosedOK
 
 async def handler(websocket):
     print(f"Client connected: {websocket.id}")
+
     request = websocket.request
-    print(f"Request: {request}")
+    if request.headers.get("X-Userinfo"):
+        userinfo = json.loads(base64.b64decode(request.headers.get("X-Userinfo")))
+    else:
+        userinfo = { "preferred_username": "Anonymous" }
+        print(f"{websocket.id}: No user data found")
 
-    userinfo = json.loads(base64.b64decode(request.headers.get("X-Userinfo")))
-
-    print(f"Userinfo: {userinfo}")
+    print(f"{websocket.id}: Username: {userinfo['preferred_username']}")
     await websocket.send(f"=> Hello, {userinfo['preferred_username']}")
 
     while True:
         try:
             message = await websocket.recv()
             print(f"{websocket.id} sent: {message}")
-            await websocket.send(f"Echo: {message}")
+            await websocket.send(f"{message}")
         except ConnectionClosedOK:
             print(f"Client disconnected: {websocket.id}")
             break
