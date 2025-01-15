@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Testing!</title>
+
+    <script type="text/javascript">
+        const ws = new WebSocket("ws://localhost:6701/ws");
+        const messagesReceived = [];
+
+        ws.addEventListener("open", () => {
+            document.getElementById("socket-connected").classList.remove("hidden");
+        });
+
+        ws.addEventListener("message", (event) => {
+            addMessage(event.data, true);
+        });
+
+        ws.addEventListener("error", (event) => {
+            console.error("WebSocket error (don't expect useful data out of this)", event);
+            document.getElementById("socket-error").classList.remove("hidden");
+            window.setTimeout(() => {
+                document.getElementById("socket-error").classList.add("hidden");
+            }, 5000);
+        });
+
+        ws.addEventListener("close", () => {
+            document.getElementById("socket-disconnected").classList.remove("hidden");
+            document.getElementById("socket-connected").classList.add("hidden");
+        });
+
+        function addMessage(message, fromServer = false) {
+            if (fromServer) {
+                message = "<span class='server'>" + message + "</span>";
+            } else {
+                message = "<span class='client'>" + message + "</span>";
+            }
+
+            messagesReceived.push(message);
+            document.getElementById("messages").innerHTML = messagesReceived.join("<br>");
+        }
+
+        function sendMessage() {
+            addMessage(document.getElementById("message").value);
+            ws.send(document.getElementById("message").value);
+            document.getElementById("message").value = "";
+            document.getElementById("message").focus();
+        }
+    </script>
+
+    <style>
+        body {
+            width: 90%;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .server {
+            color: blue;
+        }
+
+        .server::before {
+            content: "Reply: ";
+        }
+
+        #message-form {
+            padding: 5px;
+            margin: 2rem 5px;
+            width: 100%;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+        }
+
+        #message-form label {
+            margin-right: 5px;
+        }
+
+        #message-form input {
+            margin-right: 5px;
+            width: 30%;
+        }
+
+        #message-form button {
+            margin-right: 5px;
+            width: 10%;
+        }
+
+        #messages {
+            padding: 5px;
+            margin: 2rem 5px;
+            width: 100%;
+            border: 1px solid blue;
+        }
+
+        #socket-connected {
+            color: green;
+            padding: 5px;
+            margin: 5px;
+            width: 100%;
+            border: 1px solid green;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebSocket Testing</h1>
+
+    <div class="hidden" id="socket-connected">Socket Connected</div>
+
+    <div class="hidden" id="socket-disconnected">Socket Disconnected</div>
+
+    <div class="hidden" id="socket-error">Socket Error</div>
+
+    <div id="message-form">
+        <label for="message">Message: </label>
+        <input type="text" id="message" onkeydown="if (event.key === 'Enter') sendMessage()" />
+        <button id="send" onclick="sendMessage()">Send</button>
+    </div>
+
+    <div id="messages"></div>
+</body>
+</html>
